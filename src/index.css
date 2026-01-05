@@ -1,3 +1,28 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* [關鍵修正] 強制全域設定：解決手機版白邊與高度不足問題 */
+html, body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden; /* 禁止左右滑動，消除右側白邊 */
+  -webkit-tap-highlight-color: transparent; /* 移除手機點擊時的藍色高亮框 */
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: #f3f4f6; /* 預設淺灰色背景，防止載入時閃爍 */
+}
+
+/* 確保 React 的根容器也填滿螢幕 */
+#root {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 深色模式支援 */
+.dark body {
+  background-color: #020617;
+}
