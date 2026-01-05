@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* [關鍵修正] 強制全域設定：解決手機版白邊與高度不足問題 */
+/* 強制全域設定：解決手機版白邊與高度不足問題 */
 html, body {
   height: 100%;
   width: 100%;
