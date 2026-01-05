@@ -286,7 +286,7 @@ export default function ClientFlow() {
     return () => unsubscribe();
   }, [sessionUser, currentUser]);
 
-  // Fetch Company Settings
+  // Fetch Company Settings (All)
   useEffect(() => {
     if (!currentUser?.companyCode) return;
     const settingsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'company_settings', currentUser.companyCode);
@@ -334,7 +334,7 @@ export default function ClientFlow() {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isSuperAdmin = currentUser?.role === 'super_admin';
   
-  // Filtering
+  // Filtering & Stats Logic
   const visibleCustomers = useMemo(() => {
     let baseData = customers;
     if (!isAdmin) {
@@ -615,8 +615,12 @@ export default function ClientFlow() {
       
       if (type === 'user') {
           try {
-             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', item.id));
-          } catch(e) { alert("刪除失敗"); }
+             const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_users', item.id);
+             await deleteDoc(userRef);
+          } catch(e) {
+             console.error(e);
+             alert("刪除失敗，請檢查網路或權限");
+          }
       } else if (type === 'ad') {
           let currentAds = projectAds[region] || [];
           const updatedAdsList = currentAds.filter(a => (a.id ? a.id !== item.id : a !== item)); 
