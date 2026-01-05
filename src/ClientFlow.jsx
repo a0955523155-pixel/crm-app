@@ -5,10 +5,10 @@ import {
   Cloud, Loader2, Download, Moon, Sun, LayoutDashboard, List, LogOut, UserCircle, 
   ShieldCheck, Lock, Key, MapPin, Tag, Image as ImageIcon, Upload, BarChart3, 
   TrendingUp, Filter, CalendarDays, UserCog, Ban, Check, Copy, RefreshCcw, 
-  Building2, Settings, FolderPlus, Folder, AlertOctagon
+  Building2, Settings, FolderPlus, Folder, AlertOctagon, Megaphone
 } from 'lucide-react';
 
-// [修正] 將 Firebase 初始化邏輯放回此檔案，確保預覽與單檔運作正常
+// [修正] 將 Firebase 初始化邏輯放回此檔案
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -59,7 +59,8 @@ const appId = "greenshootteam";
 const ADMIN_CODE = "888888";       // 普通管理員註冊碼
 const SUPER_ADMIN_CODE = "123456"; // 最高管理員註冊碼
 
-const SOURCES = ["FB", "帆布", "591", "小黃板", "DM", "他人介紹", "自行開發", "官方LINE", "其他"];
+// 預設來源 (全域)
+const DEFAULT_SOURCES = ["FB", "帆布", "591", "小黃板", "DM", "他人介紹", "自行開發", "官方LINE", "其他"];
 const CATEGORIES = ["買方", "賣方", "承租方", "出租方"];
 const LEVELS = ["A", "B", "C"];
 
@@ -149,7 +150,6 @@ const ClientCard = ({ c, darkMode, onClick }) => (
             </div>
             <StatusBadge status={c.status} />
         </div>
-        {/* [修正] pl-13 改為 pl-12 (標準 Tailwind 類別)，修復對齊問題 */}
         <div className="flex items-center justify-between mt-3 text-[11px] text-gray-400 font-medium pl-12">
             <span className="flex items-center gap-3">
                 <span className="flex items-center"><Clock className="w-3 h-3 mr-1" />{c.lastContact}</span>
@@ -177,8 +177,15 @@ export default function ClientFlow() {
   
   // Projects State
   const [companyProjects, setCompanyProjects] = useState(DEFAULT_PROJECTS);
+  // [新增] 案場廣告設定 State: { "ProjectName": ["Ad1", "Ad2"] }
+  const [projectAds, setProjectAds] = useState({}); 
+
   const [newRegionName, setNewRegionName] = useState('');
   const [newProjectNames, setNewProjectNames] = useState({});
+  
+  // 廣告管理 Modal 狀態
+  const [adManageProject, setAdManageProject] = useState(null); // 當前正在管理廣告的案場名稱
+  const [newAdName, setNewAdName] = useState('');
 
   // 刪除確認狀態
   const [pendingDelete, setPendingDelete] = useState(null);
@@ -255,19 +262,19 @@ export default function ClientFlow() {
     return () => unsubscribe();
   }, [sessionUser, currentUser]);
 
-  // Fetch Company Settings (Projects)
+  // Fetch Company Settings (Projects & Ads)
   useEffect(() => {
     if (!currentUser?.companyCode) return;
     const settingsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'company_settings', currentUser.companyCode);
     const unsubscribe = onSnapshot(settingsDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data.projects) {
-          setCompanyProjects(data.projects);
-        }
+        if (data.projects) setCompanyProjects(data.projects);
+        if (data.projectAds) setProjectAds(data.projectAds); // 載入廣告設定
       } else {
         setCompanyProjects(DEFAULT_PROJECTS);
-        setDoc(settingsDocRef, { projects: DEFAULT_PROJECTS }, { merge: true });
+        setProjectAds({});
+        setDoc(settingsDocRef, { projects: DEFAULT_PROJECTS, projectAds: {} }, { merge: true });
       }
     });
     return () => unsubscribe();
@@ -493,7 +500,6 @@ export default function ClientFlow() {
       }
   };
 
-  // [修改] 觸發刪除使用者的確認視窗
   const handleDeleteUser = (user) => {
       if (!isSuperAdmin) return;
       setPendingDelete({ type: 'user', item: user });
@@ -501,14 +507,18 @@ export default function ClientFlow() {
 
   // --- Project Management Handlers ---
 
-  const saveProjectsToFirestore = async (newProjects) => {
+  const saveSettingsToFirestore = async (newProjects, newProjectAds) => {
     if (!currentUser?.companyCode) return;
     try {
       const settingsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'company_settings', currentUser.companyCode);
-      await setDoc(settingsDocRef, { projects: newProjects }, { merge: true });
+      // 同時更新 projects 和 projectAds
+      const updatePayload = {};
+      if (newProjects) updatePayload.projects = newProjects;
+      if (newProjectAds) updatePayload.projectAds = newProjectAds;
+      
+      await setDoc(settingsDocRef, updatePayload, { merge: true });
     } catch (err) {
-      console.error("Failed to save projects:", err);
-      console.log("儲存失敗");
+      console.error("Failed to save settings:", err);
     }
   };
 
@@ -520,7 +530,7 @@ export default function ClientFlow() {
     }
     const updated = { ...companyProjects, [newRegionName]: [] };
     setCompanyProjects(updated);
-    saveProjectsToFirestore(updated);
+    saveSettingsToFirestore(updated, null);
     setNewRegionName('');
   };
 
@@ -534,9 +544,29 @@ export default function ClientFlow() {
     }
     const updated = { ...companyProjects, [region]: [...currentList, pName] };
     setCompanyProjects(updated);
-    saveProjectsToFirestore(updated);
+    saveSettingsToFirestore(updated, null);
     setNewProjectNames({ ...newProjectNames, [region]: '' });
   };
+
+  // 廣告管理功能
+  const handleAddAd = () => {
+    if (!newAdName.trim() || !adManageProject) return;
+    const currentAds = projectAds[adManageProject] || [];
+    const updatedAds = { ...projectAds, [adManageProject]: [...currentAds, newAdName] };
+    setProjectAds(updatedAds);
+    saveSettingsToFirestore(null, updatedAds);
+    setNewAdName('');
+  };
+
+  const handleDeleteAd = (adName) => {
+    if (!adManageProject) return;
+    if (!confirm(`確定刪除廣告選項「${adName}」嗎？`)) return; // 簡單刪除，不走複雜 Modal
+    const currentAds = projectAds[adManageProject] || [];
+    const updatedAds = { ...projectAds, [adManageProject]: currentAds.filter(a => a !== adName) };
+    setProjectAds(updatedAds);
+    saveSettingsToFirestore(null, updatedAds);
+  };
+
 
   // 觸發刪除確認視窗
   const handleDeleteRegion = (regionName) => {
@@ -547,13 +577,12 @@ export default function ClientFlow() {
       setPendingDelete({ type: 'project', region: region, item: project });
   };
 
-  // [修改] 執行刪除的邏輯 (增加刪除使用者的分支)
+  // 執行刪除的邏輯
   const executeDelete = async () => {
       if (!pendingDelete) return;
       const { type, region, item } = pendingDelete;
       
       if (type === 'user') {
-          // 刪除使用者
           try {
              const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_users', item.id);
              await deleteDoc(userRef);
@@ -562,7 +591,6 @@ export default function ClientFlow() {
              alert("刪除失敗，請檢查網路或權限");
           }
       } else {
-          // 刪除專案/地區
           let updated = { ...companyProjects };
           if (type === 'region') {
               delete updated[region];
@@ -570,12 +598,16 @@ export default function ClientFlow() {
               if (updated[region]) {
                   updated[region] = updated[region].filter(p => p !== item);
               }
+              // 同時刪除該案場的廣告設定 (Optional)
+              // const updatedAds = { ...projectAds };
+              // delete updatedAds[item];
+              // setProjectAds(updatedAds);
           }
           setCompanyProjects(updated);
-          saveProjectsToFirestore(updated);
+          saveSettingsToFirestore(updated, null);
       }
       
-      setPendingDelete(null); // 關閉視窗
+      setPendingDelete(null); 
   };
 
   // --- Customer Handlers ---
@@ -656,15 +688,12 @@ export default function ClientFlow() {
     setIsExporting(true);
     
     try {
-        // 定義 CSV 標頭
         const headers = [
             '公司代碼', '負責業務', '建立日期', '客戶姓名', '性別', 
             '級別', '需求分類', '公司名稱', '聯絡電話', '次要專員', 
             '可聯絡時間', '從何得知', '關注案場', '通訊地址', '需求地區', 
             '需求坪數', '預算 (NTD)', '目前狀態', '備註', '最後聯絡', '記事數'
         ];
-
-        // 轉換數據
         const csvRows = [headers.join(',')];
 
         dataToExport.forEach(c => {
@@ -687,14 +716,13 @@ export default function ClientFlow() {
                 `"${c.reqPing || ''}"`,
                 `"${c.value || 0}"`,
                 `"${STATUS_CONFIG[c.status]?.label || c.status || ''}"`,
-                `"${(c.remarks || '').replace(/"/g, '""')}"`, // Escape quotes for CSV
+                `"${(c.remarks || '').replace(/"/g, '""')}"`, 
                 `"${c.lastContact || ''}"`,
                 `"${(c.notes || []).length}"`
             ];
             csvRows.push(row.join(','));
         });
 
-        // 加入 BOM (\uFEFF) 以支援中文顯示
         const csvString = '\uFEFF' + csvRows.join('\n');
         const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
@@ -723,8 +751,8 @@ export default function ClientFlow() {
 
     return (
       <div className="pb-24">
-        {/* [修正] 將標題列的 padding (px-6) 改為與列表內容一致 (px-4)，解決右側空白視覺問題 */}
-        <div className={`px-4 pt-10 pb-4 sticky top-0 z-10 border-b transition-colors ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
+        {/* [修正] 將標題列設定為 w-full 以填滿螢幕，防止左右滑動 */}
+        <div className={`w-full px-4 pt-10 pb-4 sticky top-0 z-10 border-b transition-colors ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
            <div className="flex justify-between items-center mb-4">
               <div>
                  <h1 className={`text-2xl font-black ${darkMode ? 'text-white' : 'text-gray-900'}`}>客戶列表</h1>
@@ -833,16 +861,27 @@ export default function ClientFlow() {
                    
                    <div className="flex flex-wrap gap-2 mb-3">
                      {projectList.map(project => (
-                       <span key={project} className={`text-xs px-2 py-1 rounded-md flex items-center gap-1 group/item ${darkMode ? 'bg-slate-700 text-gray-200' : 'bg-white border shadow-sm text-gray-600'}`}>
-                         {project}
-                         <button 
-                            type="button" 
-                            onClick={(e) => { e.stopPropagation(); handleDeleteProject(region, project); }} 
-                            className="text-gray-400 hover:text-red-600 transition-colors ml-1"
-                         >
-                            <XCircle className="w-4 h-4" />
-                         </button>
-                       </span>
+                       <div key={project} className={`relative group/item flex items-center`}>
+                           <span className={`text-xs px-2 py-1 rounded-md flex items-center gap-1 border ${darkMode ? 'bg-slate-700 text-gray-200 border-slate-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                             {project}
+                             {/* [新增] 廣告管理按鈕 */}
+                             <button 
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setAdManageProject(project); }}
+                                className="ml-1 text-blue-400 hover:text-blue-600"
+                                title="管理廣告選項"
+                             >
+                                <Megaphone className="w-3 h-3" />
+                             </button>
+                             <button 
+                                type="button" 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteProject(region, project); }} 
+                                className="text-gray-400 hover:text-red-600 transition-colors ml-1"
+                             >
+                                <XCircle className="w-3 h-3" />
+                             </button>
+                           </span>
+                       </div>
                      ))}
                      {projectList.length === 0 && <span className="text-xs text-gray-400 italic">尚無案場</span>}
                    </div>
@@ -955,14 +994,13 @@ export default function ClientFlow() {
 
   const LoginScreen = () => {
     const [isRegister, setIsRegister] = useState(false);
-    // [修改] 新增 rememberMe 狀態
     const [form, setForm] = useState({ username: '', password: '', name: '', role: 'user', adminCode: '', companyCode: '', rememberMe: false });
     const [usernameError, setUsernameError] = useState(''); 
     const [isCheckingUser, setIsCheckingUser] = useState(false);
     const [captcha, setCaptcha] = useState("");
     const [captchaInput, setCaptchaInput] = useState("");
 
-    // [新增] 自動讀取儲存的帳號密碼
+    // 自動讀取儲存的帳號密碼
     useEffect(() => {
         const savedLogin = localStorage.getItem('crm-login-info');
         if (savedLogin) {
@@ -1030,7 +1068,6 @@ export default function ClientFlow() {
         const success = await handleRegister(form.username, form.password, form.name, form.role, form.adminCode, form.companyCode);
         if (success) { setIsRegister(false); setForm(p => ({...p, password: '', adminCode: ''})); }
       } else {
-        // 傳遞 rememberMe 參數
         handleLogin(form.username, form.password, form.companyCode, form.rememberMe);
       }
     };
@@ -1075,7 +1112,7 @@ export default function ClientFlow() {
                   <input type="password" required className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 focus:ring-blue-500 mt-1 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-gray-50 border-gray-200'}`} value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="輸入密碼" />
                </div>
                
-               {/* [新增] 記住我選項 */}
+               {/* 記住我選項 */}
                {!isRegister && (
                    <div className="flex items-center ml-1">
                        <input 
@@ -1116,7 +1153,7 @@ export default function ClientFlow() {
                        <div className="animate-in fade-in slide-in-from-top-2">
                           <label className="text-xs font-bold text-purple-500 uppercase ml-1 flex items-center gap-1"><Key className="w-3 h-3" /> 註冊碼</label>
                           <input type="password" required className={`w-full px-4 py-3 rounded-xl border-2 border-purple-100 outline-none mt-1 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-purple-50/50'}`} value={form.adminCode} onChange={e => setForm({...form, adminCode: e.target.value})} placeholder="請輸入註冊碼" />
-                          {/* [修正] 刪除了此處的 <p> 提示文字 */}
+                          {/* [修正] 已移除文字提示 */}
                        </div>
                      )}
                  </div>
@@ -1148,6 +1185,15 @@ export default function ClientFlow() {
     }, [initialData]);
 
     const [isProcessingImg, setIsProcessingImg] = useState(false);
+
+    // [新增] 根據所選專案動態更新「從何得知」選單
+    const availableSources = useMemo(() => {
+        const baseSources = DEFAULT_SOURCES;
+        if (formData.project && projectAds[formData.project]) {
+            return [...baseSources, ...projectAds[formData.project]]; // 合併預設來源與該案場的廣告選項
+        }
+        return baseSources;
+    }, [formData.project, projectAds]);
 
     const handleFileChange = async (e) => {
         const file = e.target.files[0];
@@ -1200,24 +1246,33 @@ export default function ClientFlow() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">需求分類</label><select className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">客戶級別</label><select className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.level} onChange={e => setFormData({...formData, level: e.target.value})}>{LEVELS.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
-                    <div><label className="text-xs font-bold text-gray-400 mb-1 block">從何得知</label><select className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.source} onChange={e => setFormData({...formData, source: e.target.value})}>{SOURCES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-                    <div><label className="text-xs font-bold text-gray-400 mb-1 block">次要專員</label><input className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.secondaryAgent} onChange={e => setFormData({...formData, secondaryAgent: e.target.value})} /></div>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-400 mb-1 block">關注案場</label>
-                  <select className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.project} onChange={e => setFormData({...formData, project: e.target.value})}>
-                    <option value="">請選擇...</option>
-                    {Object.entries(companyProjects).map(([region, sites]) => (
-                      <optgroup key={region} label={region}>
-                        {sites.map(site => <option key={site} value={site}>{site}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
+                    <div>
+                        <label className="text-xs font-bold text-gray-400 mb-1 block">關注案場</label>
+                        <select className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.project} onChange={e => setFormData({...formData, project: e.target.value})}>
+                            <option value="">請選擇...</option>
+                            {Object.entries(companyProjects).map(([region, sites]) => (
+                            <optgroup key={region} label={region}>
+                                {sites.map(site => <option key={site} value={site}>{site}</option>)}
+                            </optgroup>
+                            ))}
+                        </select>
+                    </div>
+                    {/* [修改] 來源選單現在會顯示該案場的廣告選項 */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-400 mb-1 block">從何得知</label>
+                        <select className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.source} onChange={e => setFormData({...formData, source: e.target.value})}>
+                            {availableSources.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 dark:bg-slate-900/50 p-3 rounded-lg border border-dashed border-gray-300 dark:border-slate-700">
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">需求地區</label><input className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.reqRegion} onChange={e => setFormData({...formData, reqRegion: e.target.value})} placeholder="例：屏東萬丹" /></div>
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">需求坪數</label><input className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.reqPing} onChange={e => setFormData({...formData, reqPing: e.target.value})} placeholder="例：100坪" /></div>
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">預算 (NTD)</label><input type="number" className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.value} onChange={e => setFormData({...formData, value: e.target.value})} /></div>
+                </div>
+                <div className="w-full">
+                   <label className="text-xs font-bold text-gray-400 mb-1 block">次要專員</label>
+                   <input className={`w-full px-3 py-2 border rounded-lg outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.secondaryAgent} onChange={e => setFormData({...formData, secondaryAgent: e.target.value})} />
                 </div>
                 <div><label className="text-xs font-bold text-gray-400 mb-1 block">其他備註</label><textarea rows="2" className={`w-full px-3 py-2 border rounded-lg outline-none resize-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'}`} value={formData.remarks} onChange={e => setFormData({...formData, remarks: e.target.value})} /></div>
             </div>
@@ -1335,7 +1390,7 @@ export default function ClientFlow() {
         )}
       </div>
 
-      {/* 刪除確認視窗 (Modal) */}
+      {/* 刪除/管理確認視窗 (Modal) */}
       {pendingDelete && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className={`w-full max-w-sm p-6 rounded-2xl shadow-xl transform transition-all ${darkMode ? 'bg-slate-900 text-white' : 'bg-white'}`}>
@@ -1356,6 +1411,40 @@ export default function ClientFlow() {
                     <button onClick={executeDelete} className="flex-1 py-3 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 shadow-lg shadow-red-600/30 transition-all active:scale-95">確認刪除</button>
                 </div>
             </div>
+        </div>
+      )}
+
+      {/* [新增] 廣告管理 Modal */}
+      {adManageProject && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+             <div className={`w-full max-w-sm p-6 rounded-2xl shadow-xl transform transition-all ${darkMode ? 'bg-slate-900 text-white' : 'bg-white'}`}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold flex items-center gap-2"><Megaphone className="w-5 h-5 text-blue-500"/> 管理廣告: {adManageProject}</h3>
+                    <button onClick={() => setAdManageProject(null)}><XCircle className="w-5 h-5 opacity-50 hover:opacity-100"/></button>
+                </div>
+                
+                <div className="space-y-3 mb-6">
+                    <div className="flex gap-2">
+                        <input 
+                            value={newAdName} 
+                            onChange={(e) => setNewAdName(e.target.value)}
+                            className={`flex-1 px-3 py-2 rounded-lg border text-sm outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-gray-50 border-gray-300'}`}
+                            placeholder="輸入廣告名稱 (如: FB-大成一期)"
+                        />
+                        <button onClick={handleAddAd} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-bold">新增</button>
+                    </div>
+                    <div className="max-h-40 overflow-y-auto space-y-2">
+                        {(projectAds[adManageProject] || []).length === 0 ? <p className="text-xs text-gray-400 text-center py-2">目前無專屬廣告來源</p> : 
+                            (projectAds[adManageProject] || []).map(ad => (
+                                <div key={ad} className="flex justify-between items-center bg-gray-100 dark:bg-slate-800 px-3 py-2 rounded-lg text-sm">
+                                    <span>{ad}</span>
+                                    <button onClick={() => handleDeleteAd(ad)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
+                                </div>
+                            ))
+                        }
+                    </div>
+                </div>
+             </div>
         </div>
       )}
     </div>
