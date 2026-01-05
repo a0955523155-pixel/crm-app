@@ -6,10 +6,11 @@ import {
   ShieldCheck, Lock, Key, MapPin, Tag, Image as ImageIcon, Upload, BarChart3, 
   TrendingUp, Filter, CalendarDays, UserCog, Ban, Check, Copy, RefreshCcw, 
   Building2, Settings, FolderPlus, Folder, AlertOctagon, Megaphone, Timer, Save,
-  Activity, MonitorPlay, Sliders, PlusCircle
+  Activity, MonitorPlay, Sliders, PlusCircle, X
 } from 'lucide-react';
 
-import { initializeApp } from 'firebase/app';
+// [修正] 引入 getApps 與 getApp 以防止重複初始化錯誤
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -44,10 +45,9 @@ const firebaseConfig = {
   measurementId: "G-CYS5W473VS"
 };
 
-let app;
-try {
-    app = initializeApp(firebaseConfig);
-} catch (e) {}
+// [關鍵修正] 使用標準的單例模式初始化 Firebase
+// 這能解決 "Firebase App named '[DEFAULT]' already exists" 導致的白屏問題
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 
@@ -56,7 +56,7 @@ const appId = "greenshootteam";
 const ADMIN_CODE = "888888";
 const SUPER_ADMIN_CODE = "123456";
 
-// [修改] 這些現在只作為「初始化預設值」，之後會從資料庫讀取
+// 預設值 (若資料庫無設定時使用)
 const DEFAULT_SOURCES = ["FB", "帆布", "591", "小黃板", "DM", "他人介紹", "自行開發", "官方LINE", "其他"];
 const DEFAULT_CATEGORIES = ["買方", "賣方", "承租方", "出租方"];
 const DEFAULT_LEVELS = ["A", "B", "C"];
@@ -136,6 +136,8 @@ const getAdStatus = (startDate, endDate) => {
     return { daysLeft, percent, status };
 };
 
+// --- 子元件 ---
+
 const StatusBadge = ({ status }) => {
     const config = STATUS_CONFIG[status] || STATUS_CONFIG['potential'];
     const Icon = config.icon;
@@ -189,13 +191,13 @@ export default function ClientFlow() {
   const [companyProjects, setCompanyProjects] = useState(DEFAULT_PROJECTS);
   const [projectAds, setProjectAds] = useState({}); 
 
-  // [新增] 全域設定 State
+  // 全域設定 State
   const [appSettings, setAppSettings] = useState({
       sources: DEFAULT_SOURCES,
       categories: DEFAULT_CATEGORIES,
       levels: DEFAULT_LEVELS
   });
-  const [newOption, setNewOption] = useState(''); // 用於新增選項的暫存
+  const [newOption, setNewOption] = useState(''); 
 
   // Dashboard Sub-view
   const [dashboardView, setDashboardView] = useState('stats'); // 'stats' | 'ads' | 'settings'
@@ -283,14 +285,12 @@ export default function ClientFlow() {
         if (data.projects) setCompanyProjects(data.projects);
         if (data.projectAds) setProjectAds(data.projectAds);
         
-        // [新增] 讀取通用設定，若無則使用預設值
         setAppSettings({
             sources: data.sources || DEFAULT_SOURCES,
             categories: data.categories || DEFAULT_CATEGORIES,
             levels: data.levels || DEFAULT_LEVELS
         });
       } else {
-        // 初始化所有設定
         const initData = { 
             projects: DEFAULT_PROJECTS, 
             projectAds: {},
@@ -323,7 +323,7 @@ export default function ClientFlow() {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isSuperAdmin = currentUser?.role === 'super_admin';
   
-  // Filtering & Stats Logic (略為省略，邏輯不變)
+  // Filtering & Stats Logic
   const visibleCustomers = useMemo(() => {
     let baseData = customers;
     if (!isAdmin) {
@@ -407,6 +407,7 @@ export default function ClientFlow() {
     return Object.values(statsMap).sort((a, b) => b.total - a.total);
   }, [customers]);
 
+  // Handlers
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('crm-user-profile');
@@ -511,9 +512,6 @@ export default function ClientFlow() {
       setPendingDelete({ type: 'user', item: user });
   };
 
-  // --- Generic Setting Handlers ---
-  
-  // [新增] 儲存通用設定到 Firebase
   const saveAppSettingsToFirestore = async (newSettings) => {
       if (!currentUser?.companyCode) return;
       try {
@@ -522,7 +520,6 @@ export default function ClientFlow() {
       } catch(err) { console.error(err); }
   };
 
-  // [新增] 新增通用選項 (來源/分類/級別)
   const handleAddOption = (type) => {
       if (!newOption.trim()) return;
       if (appSettings[type].includes(newOption.trim())) return alert("選項已存在");
@@ -534,7 +531,6 @@ export default function ClientFlow() {
       setNewOption('');
   };
 
-  // [新增] 刪除通用選項
   const handleDeleteOption = (type, option) => {
       if(!confirm(`確定刪除「${option}」嗎？`)) return;
       const updatedList = appSettings[type].filter(item => item !== option);
@@ -543,7 +539,6 @@ export default function ClientFlow() {
       saveAppSettingsToFirestore({ [type]: updatedList });
   };
 
-  // --- Project & Ads Handlers ---
   const saveSettingsToFirestore = async (newProjects, newProjectAds) => {
     if (!currentUser?.companyCode) return;
     try {
@@ -556,7 +551,8 @@ export default function ClientFlow() {
   };
 
   const handleAddRegion = () => {
-    if (!newRegionName.trim() || companyProjects[newRegionName]) return alert("無效或重複的分類");
+    if (!newRegionName.trim()) return;
+    if (companyProjects[newRegionName]) return alert("無效或重複的分類");
     const updated = { ...companyProjects, [newRegionName]: [] };
     setCompanyProjects(updated);
     saveSettingsToFirestore(updated, null);
@@ -778,7 +774,6 @@ export default function ClientFlow() {
     );
   };
   
-  // [新增] 通用選項管理介面
   const renderSettingsDashboard = () => {
       const tabs = [
           { key: 'sources', label: '來源設定' },
@@ -968,6 +963,7 @@ export default function ClientFlow() {
 
     return (
       <div className={`min-h-screen w-full flex items-center justify-center p-4 transition-colors ${darkMode ? 'bg-slate-950' : 'bg-gray-100'}`}>
+         {/* [修正] Login Container width */}
          <div className={`w-[90%] max-w-md p-8 rounded-2xl shadow-xl transition-colors ${darkMode ? 'bg-slate-900 border border-slate-800' : 'bg-white'}`}>
             <div className="text-center mb-8">
                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-600 text-white mb-4 shadow-lg shadow-blue-600/30"><Briefcase className="w-8 h-8" /></div>
@@ -982,6 +978,7 @@ export default function ClientFlow() {
                  <div className="space-y-4">
                      <div><label className="text-xs font-bold text-gray-400">姓名</label><input required className={`w-full px-4 py-3 rounded-xl border outline-none ${darkMode ? 'bg-slate-800 text-white' : 'bg-gray-50'}`} value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>
                      
+                     {/* [修正] 恢復角色選擇按鈕 */}
                      <div>
                         <label className="text-xs font-bold text-gray-400 uppercase ml-1">角色</label>
                         <div className="grid grid-cols-2 gap-3 mt-1">
@@ -1002,11 +999,12 @@ export default function ClientFlow() {
     );
   };
 
+  // --- CustomerForm & Detail (Retained with Fixes) ---
   const CustomerForm = ({ onSubmit, onCancel, initialData }) => {
     const [formData, setFormData] = useState(initialData || { name: '', gender: '男', category: '買方', level: 'C', company: '', phone: '', secondaryAgent: '', value: '', contactTime: '', source: '其他', project: '', address: '', reqRegion: '', reqPing: '', status: 'potential', remarks: '', email: '', businessCard: '', createdAt: formatDateString(new Date()) });
     const [isProcessingImg, setIsProcessingImg] = useState(false);
     
-    // [使用資料庫設定]
+    // [選單防呆]
     const availableSources = useMemo(() => {
         let sources = [...appSettings.sources];
         if (formData.project && projectAds[formData.project]) {
@@ -1052,6 +1050,7 @@ export default function ClientFlow() {
                     <div><label className="text-xs font-bold text-gray-400 block mb-1">客戶級別</label><select className="w-full px-3 py-2 border rounded-lg" value={formData.level} onChange={e => setFormData({...formData, level: e.target.value})}>{appSettings.levels.map(l => <option key={l}>{l}</option>)}</select></div>
                 </div>
                 
+                {/* 獨立一行顯示案場與來源 */}
                 <div>
                     <label className="text-xs font-bold text-gray-400 block mb-1">關注案場</label>
                     <select className="w-full px-3 py-2 border rounded-lg" value={formData.project} onChange={e => setFormData({...formData, project: e.target.value})}>
@@ -1093,7 +1092,7 @@ export default function ClientFlow() {
     return (
         <div className={`min-h-screen w-full p-4 ${darkMode ? 'dark bg-slate-950 text-white' : 'bg-gray-50 text-gray-900'}`}>
              <div className="max-w-4xl mx-auto space-y-4">
-                 <button onClick={() => setView('list')} className="flex items-center text-sm text-gray-500 mb-2"><ArrowLeft className="w-4 h-4 mr-1"/> 返回</button>
+                 <button onClick={() => setView('list')} className="flex items-center text-sm text-gray-500 mb-2"><ArrowLeft className="w-4 h-4 mr-1"/> 返回列表</button>
                  <div className="p-6 rounded-2xl border shadow-sm bg-white dark:bg-slate-900">
                      <div className="flex justify-between"><h2 className="text-2xl font-bold">{customer.name}</h2>{isOwner && <div className="flex gap-2"><button onClick={() => setView('edit')}><Edit className="w-5 h-5"/></button><button onClick={() => setShowDeleteModal(true)}><Trash2 className="w-5 h-5 text-red-500"/></button></div>}</div>
                      <p className="mt-2">電話: {customer.phone}</p><p>備註: {customer.remarks}</p>
