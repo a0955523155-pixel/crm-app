@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+﻿iimport React, { useState, useMemo, useEffect } from 'react';
 import { 
   Users, Plus, Search, Phone, Mail, Briefcase, ChevronRight, ArrowLeft, Clock, 
   CheckCircle, XCircle, Calendar, FileText, Send, Trash2, Edit, AlertTriangle, 
@@ -8,8 +8,7 @@ import {
   Building2, Settings, FolderPlus, Folder, AlertOctagon
 } from 'lucide-react';
 
-// [修正] 將 Firebase 初始化邏輯放回此檔案，解決無法讀取外部檔案的錯誤
-// 這樣無論是在此預覽或是您複製回本機，都能直接運作
+// [修正] 將 Firebase 初始化邏輯放回此檔案，確保預覽與單檔運作正常
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -46,20 +45,17 @@ const firebaseConfig = {
 };
 
 // 初始化 Firebase
-// 注意：在 React Strict Mode 下可能會重複初始化，這裡做個簡單檢查
 let app;
 try {
     app = initializeApp(firebaseConfig);
 } catch (e) {
-    // 如果已經初始化過，這裡會捕捉錯誤 (通常在開發環境會發生)
+    // 忽略重複初始化錯誤
 }
-// 獲取服務實例
-// 這裡簡單處理：直接使用 getAuth() 等，它們會自動使用預設 app
 const auth = getAuth(app);
 const db = getFirestore(app);
 
 // --- 常數設定 ---
-const appId = "greenshootteam"; // [修改] 設定固定的 App ID
+const appId = "greenshootteam"; 
 const ADMIN_CODE = "888888";       // 普通管理員註冊碼
 const SUPER_ADMIN_CODE = "123456"; // 最高管理員註冊碼
 
@@ -153,7 +149,8 @@ const ClientCard = ({ c, darkMode, onClick }) => (
             </div>
             <StatusBadge status={c.status} />
         </div>
-        <div className="flex items-center justify-between mt-3 text-[11px] text-gray-400 font-medium pl-13">
+        {/* [修正] pl-13 改為 pl-12 (標準 Tailwind 類別)，解決排版問題 */}
+        <div className="flex items-center justify-between mt-3 text-[11px] text-gray-400 font-medium pl-12">
             <span className="flex items-center gap-3">
                 <span className="flex items-center"><Clock className="w-3 h-3 mr-1" />{c.lastContact}</span>
                 <span className="text-blue-500">NT$ {c.value?.toLocaleString() || 0}</span>
@@ -211,7 +208,6 @@ export default function ClientFlow() {
 
   useEffect(() => {
     const initAuth = async () => {
-      // 統一使用匿名登入
       await signInAnonymously(auth);
     };
     initAuth();
@@ -387,7 +383,6 @@ export default function ClientFlow() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('crm-user-profile');
-    // Note: We don't remove crm-login-info here to keep "Remember Me" working
     setView('login');
     setActiveTab('clients');
     setSearchTerm('');
@@ -722,7 +717,8 @@ export default function ClientFlow() {
 
     return (
       <div className="pb-24">
-        <div className={`px-6 pt-10 pb-4 sticky top-0 z-10 border-b transition-colors ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
+        {/* [修正] 將標題列的 padding (px-6) 改為與列表內容一致 (px-4)，解決右側空白視覺問題 */}
+        <div className={`px-4 pt-10 pb-4 sticky top-0 z-10 border-b transition-colors ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
            <div className="flex justify-between items-center mb-4">
               <div>
                  <h1 className={`text-2xl font-black ${darkMode ? 'text-white' : 'text-gray-900'}`}>客戶列表</h1>
@@ -952,14 +948,13 @@ export default function ClientFlow() {
 
   const LoginScreen = () => {
     const [isRegister, setIsRegister] = useState(false);
-    // [修改] 新增 rememberMe 狀態
     const [form, setForm] = useState({ username: '', password: '', name: '', role: 'user', adminCode: '', companyCode: '', rememberMe: false });
     const [usernameError, setUsernameError] = useState(''); 
     const [isCheckingUser, setIsCheckingUser] = useState(false);
     const [captcha, setCaptcha] = useState("");
     const [captchaInput, setCaptchaInput] = useState("");
 
-    // [新增] 自動讀取儲存的帳號密碼
+    // 自動讀取儲存的帳號密碼
     useEffect(() => {
         const savedLogin = localStorage.getItem('crm-login-info');
         if (savedLogin) {
@@ -1072,7 +1067,7 @@ export default function ClientFlow() {
                   <input type="password" required className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 focus:ring-blue-500 mt-1 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-gray-50 border-gray-200'}`} value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="輸入密碼" />
                </div>
                
-               {/* [新增] 記住我選項 */}
+               {/* 記住我選項 */}
                {!isRegister && (
                    <div className="flex items-center ml-1">
                        <input 
@@ -1113,7 +1108,7 @@ export default function ClientFlow() {
                        <div className="animate-in fade-in slide-in-from-top-2">
                           <label className="text-xs font-bold text-purple-500 uppercase ml-1 flex items-center gap-1"><Key className="w-3 h-3" /> 註冊碼</label>
                           <input type="password" required className={`w-full px-4 py-3 rounded-xl border-2 border-purple-100 outline-none mt-1 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-purple-50/50'}`} value={form.adminCode} onChange={e => setForm({...form, adminCode: e.target.value})} placeholder="請輸入註冊碼" />
-                          <p className="text-[10px] text-gray-400 mt-1 text-center">輸入 888888 註冊普通管理員，123456 註冊最高管理員</p>
+                          {/* [修正] 刪除了此處的 <p> 提示文字 */}
                        </div>
                      )}
                  </div>
