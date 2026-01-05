@@ -149,7 +149,7 @@ const ClientCard = ({ c, darkMode, onClick }) => (
             </div>
             <StatusBadge status={c.status} />
         </div>
-        {/* [修正] pl-13 改為 pl-12 (標準 Tailwind 類別)，解決排版問題 */}
+        {/* [修正] pl-13 改為 pl-12 (標準 Tailwind 類別)，修復對齊問題 */}
         <div className="flex items-center justify-between mt-3 text-[11px] text-gray-400 font-medium pl-12">
             <span className="flex items-center gap-3">
                 <span className="flex items-center"><Clock className="w-3 h-3 mr-1" />{c.lastContact}</span>
@@ -493,15 +493,10 @@ export default function ClientFlow() {
       }
   };
 
-  const deleteUser = async (userId) => {
+  // [修改] 觸發刪除使用者的確認視窗
+  const handleDeleteUser = (user) => {
       if (!isSuperAdmin) return;
-      if (!confirm("確定要刪除此帳號嗎？此操作不可逆。")) return;
-      try {
-          const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_users', userId);
-          await deleteDoc(userRef);
-      } catch (e) {
-          console.error("Delete user failed", e);
-      }
+      setPendingDelete({ type: 'user', item: user });
   };
 
   // --- Project Management Handlers ---
@@ -513,7 +508,6 @@ export default function ClientFlow() {
       await setDoc(settingsDocRef, { projects: newProjects }, { merge: true });
     } catch (err) {
       console.error("Failed to save projects:", err);
-      // Replace alert with simple log or status, but critical failure might need UI feedback
       console.log("儲存失敗");
     }
   };
@@ -544,7 +538,7 @@ export default function ClientFlow() {
     setNewProjectNames({ ...newProjectNames, [region]: '' });
   };
 
-  // 觸發刪除確認視窗 (不直接使用 window.confirm)
+  // 觸發刪除確認視窗
   const handleDeleteRegion = (regionName) => {
       setPendingDelete({ type: 'region', region: regionName });
   };
@@ -553,22 +547,34 @@ export default function ClientFlow() {
       setPendingDelete({ type: 'project', region: region, item: project });
   };
 
-  // 執行刪除的邏輯
-  const executeDelete = () => {
+  // [修改] 執行刪除的邏輯 (增加刪除使用者的分支)
+  const executeDelete = async () => {
       if (!pendingDelete) return;
       const { type, region, item } = pendingDelete;
-      let updated = { ...companyProjects };
-
-      if (type === 'region') {
-          delete updated[region];
-      } else if (type === 'project') {
-          if (updated[region]) {
-              updated[region] = updated[region].filter(p => p !== item);
+      
+      if (type === 'user') {
+          // 刪除使用者
+          try {
+             const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_users', item.id);
+             await deleteDoc(userRef);
+          } catch(e) {
+             console.error(e);
+             alert("刪除失敗，請檢查網路或權限");
           }
+      } else {
+          // 刪除專案/地區
+          let updated = { ...companyProjects };
+          if (type === 'region') {
+              delete updated[region];
+          } else if (type === 'project') {
+              if (updated[region]) {
+                  updated[region] = updated[region].filter(p => p !== item);
+              }
+          }
+          setCompanyProjects(updated);
+          saveProjectsToFirestore(updated);
       }
-
-      setCompanyProjects(updated);
-      saveProjectsToFirestore(updated);
+      
       setPendingDelete(null); // 關閉視窗
   };
 
@@ -877,7 +883,8 @@ export default function ClientFlow() {
                                 <button onClick={() => toggleUserStatus(u)} className={`p-2 rounded-lg text-xs font-bold ${u.status === 'suspended' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
                                     {u.status === 'suspended' ? <CheckCircle className="w-4 h-4"/> : <Ban className="w-4 h-4"/>}
                                 </button>
-                                <button onClick={() => deleteUser(u.id)} className="p-2 bg-red-100 text-red-600 rounded-lg text-xs font-bold">
+                                {/* [修改] 刪除按鈕改為觸發 Modal */}
+                                <button onClick={() => handleDeleteUser(u)} className="p-2 bg-red-100 text-red-600 rounded-lg text-xs font-bold">
                                     <Trash2 className="w-4 h-4"/>
                                 </button>
                             </div>
@@ -948,13 +955,14 @@ export default function ClientFlow() {
 
   const LoginScreen = () => {
     const [isRegister, setIsRegister] = useState(false);
+    // [修改] 新增 rememberMe 狀態
     const [form, setForm] = useState({ username: '', password: '', name: '', role: 'user', adminCode: '', companyCode: '', rememberMe: false });
     const [usernameError, setUsernameError] = useState(''); 
     const [isCheckingUser, setIsCheckingUser] = useState(false);
     const [captcha, setCaptcha] = useState("");
     const [captchaInput, setCaptchaInput] = useState("");
 
-    // 自動讀取儲存的帳號密碼
+    // [新增] 自動讀取儲存的帳號密碼
     useEffect(() => {
         const savedLogin = localStorage.getItem('crm-login-info');
         if (savedLogin) {
@@ -1067,7 +1075,7 @@ export default function ClientFlow() {
                   <input type="password" required className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 focus:ring-blue-500 mt-1 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-gray-50 border-gray-200'}`} value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="輸入密碼" />
                </div>
                
-               {/* 記住我選項 */}
+               {/* [新增] 記住我選項 */}
                {!isRegister && (
                    <div className="flex items-center ml-1">
                        <input 
@@ -1314,7 +1322,7 @@ export default function ClientFlow() {
   if (view === 'detail' && selectedCustomer) return <CustomerDetail customer={selectedCustomer} />;
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
+    <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-800'} overflow-x-hidden`}>
       {activeTab === 'clients' ? renderClientsTab() : renderDashboardTab()}
       
       {/* 底部導航 */}
@@ -1338,7 +1346,9 @@ export default function ClientFlow() {
                 <p className="text-sm opacity-80 mb-6 leading-relaxed">
                     {pendingDelete.type === 'region' 
                         ? `確定要刪除分類「${pendingDelete.region}」及其下的所有案場嗎？` 
-                        : `確定要刪除案場「${pendingDelete.item}」嗎？`}
+                        : pendingDelete.type === 'project'
+                        ? `確定要刪除案場「${pendingDelete.item}」嗎？`
+                        : `確定要刪除使用者「${pendingDelete.item.name}」嗎？`}
                     <br/><span className="text-red-500 font-bold text-xs mt-1 block">此操作無法復原。</span>
                 </p>
                 <div className="flex gap-3">
