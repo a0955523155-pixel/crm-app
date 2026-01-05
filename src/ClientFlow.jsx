@@ -9,7 +9,7 @@ import {
   Activity, MonitorPlay, Sliders, PlusCircle, X
 } from 'lucide-react';
 
-// [修正] 引入 getApps 與 getApp 以防止重複初始化錯誤
+// [重要修正] 引入 getApps 與 getApp 以確保 Firebase 連線絕對穩定
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -45,8 +45,8 @@ const firebaseConfig = {
   measurementId: "G-CYS5W473VS"
 };
 
-// [關鍵修正] 使用標準的單例模式初始化 Firebase
-// 這能解決 "Firebase App named '[DEFAULT]' already exists" 導致的白屏問題
+// [關鍵修正] 使用標準單例模式初始化
+// 這能完美解決 "Firebase App already exists" 導致的白屏問題
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -230,6 +230,17 @@ export default function ClientFlow() {
     });
   };
 
+  // 根據 Dark Mode 同步 Body 背景色
+  useEffect(() => {
+      if (darkMode) {
+          document.documentElement.classList.add('dark');
+          document.body.style.backgroundColor = '#020617';
+      } else {
+          document.documentElement.classList.remove('dark');
+          document.body.style.backgroundColor = '#f3f4f6';
+      }
+  }, [darkMode]);
+
   useEffect(() => {
     const initAuth = async () => {
       await signInAnonymously(auth);
@@ -275,7 +286,7 @@ export default function ClientFlow() {
     return () => unsubscribe();
   }, [sessionUser, currentUser]);
 
-  // Fetch Company Settings (All)
+  // Fetch Company Settings
   useEffect(() => {
     if (!currentUser?.companyCode) return;
     const settingsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'company_settings', currentUser.companyCode);
@@ -323,7 +334,7 @@ export default function ClientFlow() {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isSuperAdmin = currentUser?.role === 'super_admin';
   
-  // Filtering & Stats Logic
+  // Filtering
   const visibleCustomers = useMemo(() => {
     let baseData = customers;
     if (!isAdmin) {
@@ -608,7 +619,7 @@ export default function ClientFlow() {
           } catch(e) { alert("刪除失敗"); }
       } else if (type === 'ad') {
           let currentAds = projectAds[region] || [];
-          const updatedAdsList = currentAds.filter(a => a !== item); 
+          const updatedAdsList = currentAds.filter(a => (a.id ? a.id !== item.id : a !== item)); 
           const updatedAdsMap = { ...projectAds, [region]: updatedAdsList };
           setProjectAds(updatedAdsMap);
           saveSettingsToFirestore(null, updatedAdsMap);
