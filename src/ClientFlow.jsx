@@ -5,7 +5,7 @@ import {
   Cloud, Loader2, Download, Moon, Sun, LayoutDashboard, List, LogOut, UserCircle, 
   ShieldCheck, Lock, Key, MapPin, Tag, Image as ImageIcon, Upload, BarChart3, 
   TrendingUp, Filter, CalendarDays, UserCog, Ban, Check, Copy, RefreshCcw, 
-  Building2, Settings, FolderPlus, Folder, AlertOctagon, Megaphone
+  Building2, Settings, FolderPlus, Folder, AlertOctagon, Megaphone, Timer, Save
 } from 'lucide-react';
 
 // [修正] 將 Firebase 初始化邏輯放回此檔案
@@ -124,6 +124,17 @@ const formatDateString = (date) => {
     return `${year}-${month}-${day}`;
 };
 
+// 計算剩餘天數
+const getDaysLeft = (endDate) => {
+    if (!endDate) return null;
+    const now = new Date();
+    // 設定為當天開始
+    now.setHours(0,0,0,0);
+    const end = new Date(endDate);
+    const diff = end - now;
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+};
+
 // --- 子元件 ---
 
 const StatusBadge = ({ status }) => {
@@ -177,15 +188,16 @@ export default function ClientFlow() {
   
   // Projects State
   const [companyProjects, setCompanyProjects] = useState(DEFAULT_PROJECTS);
-  // [新增] 案場廣告設定 State: { "ProjectName": ["Ad1", "Ad2"] }
+  // 廣告設定 State: { "ProjectName": [{id, name, startDate, endDate}] }
   const [projectAds, setProjectAds] = useState({}); 
 
   const [newRegionName, setNewRegionName] = useState('');
   const [newProjectNames, setNewProjectNames] = useState({});
   
   // 廣告管理 Modal 狀態
-  const [adManageProject, setAdManageProject] = useState(null); // 當前正在管理廣告的案場名稱
-  const [newAdName, setNewAdName] = useState('');
+  const [adManageProject, setAdManageProject] = useState(null); 
+  const [adForm, setAdForm] = useState({ id: '', name: '', startDate: '', endDate: '' });
+  const [isEditingAd, setIsEditingAd] = useState(false);
 
   // 刪除確認狀態
   const [pendingDelete, setPendingDelete] = useState(null);
@@ -270,7 +282,7 @@ export default function ClientFlow() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.projects) setCompanyProjects(data.projects);
-        if (data.projectAds) setProjectAds(data.projectAds); // 載入廣告設定
+        if (data.projectAds) setProjectAds(data.projectAds); 
       } else {
         setCompanyProjects(DEFAULT_PROJECTS);
         setProjectAds({});
@@ -548,23 +560,55 @@ export default function ClientFlow() {
     setNewProjectNames({ ...newProjectNames, [region]: '' });
   };
 
-  // 廣告管理功能
-  const handleAddAd = () => {
-    if (!newAdName.trim() || !adManageProject) return;
-    const currentAds = projectAds[adManageProject] || [];
-    const updatedAds = { ...projectAds, [adManageProject]: [...currentAds, newAdName] };
-    setProjectAds(updatedAds);
-    saveSettingsToFirestore(null, updatedAds);
-    setNewAdName('');
+  // 廣告管理功能 (支援編輯、時間計算)
+  const handleSaveAd = () => {
+    if (!adForm.name.trim() || !adManageProject) return;
+    
+    // 獲取當前案場的廣告列表，需處理舊版純字串資料
+    let currentAds = projectAds[adManageProject] || [];
+    // 轉換舊資料為物件格式
+    currentAds = currentAds.map(ad => typeof ad === 'string' ? { id: Date.now() + Math.random(), name: ad, startDate: '', endDate: '' } : ad);
+
+    let updatedAdsList;
+
+    if (isEditingAd) {
+        // 更新現有
+        updatedAdsList = currentAds.map(ad => ad.id === adForm.id ? adForm : ad);
+    } else {
+        // 新增
+        updatedAdsList = [...currentAds, { ...adForm, id: Date.now() }];
+    }
+
+    const updatedAdsMap = { ...projectAds, [adManageProject]: updatedAdsList };
+    setProjectAds(updatedAdsMap);
+    saveSettingsToFirestore(null, updatedAdsMap);
+    
+    // Reset Form
+    setAdForm({ id: '', name: '', startDate: '', endDate: '' });
+    setIsEditingAd(false);
   };
 
-  const handleDeleteAd = (adName) => {
+  const handleEditAdInit = (ad) => {
+      // 相容舊版資料
+      if (typeof ad === 'string') {
+          setAdForm({ id: ad, name: ad, startDate: '', endDate: '' }); // ID 暫用名字替代
+      } else {
+          setAdForm(ad);
+      }
+      setIsEditingAd(true);
+  };
+
+  const handleDeleteAd = (adId) => {
     if (!adManageProject) return;
-    if (!confirm(`確定刪除廣告選項「${adName}」嗎？`)) return; // 簡單刪除，不走複雜 Modal
-    const currentAds = projectAds[adManageProject] || [];
-    const updatedAds = { ...projectAds, [adManageProject]: currentAds.filter(a => a !== adName) };
-    setProjectAds(updatedAds);
-    saveSettingsToFirestore(null, updatedAds);
+    if (!confirm(`確定刪除此廣告選項嗎？`)) return; 
+    
+    let currentAds = projectAds[adManageProject] || [];
+    // 過濾掉該 ID (若是舊版字串，過濾名字)
+    const updatedAdsList = currentAds.filter(a => (typeof a === 'string' ? a !== adId : a.id !== adId));
+    
+    const updatedAdsMap = { ...projectAds, [adManageProject]: updatedAdsList };
+    setProjectAds(updatedAdsMap);
+    saveSettingsToFirestore(null, updatedAdsMap);
   };
 
 
@@ -598,10 +642,6 @@ export default function ClientFlow() {
               if (updated[region]) {
                   updated[region] = updated[region].filter(p => p !== item);
               }
-              // 同時刪除該案場的廣告設定 (Optional)
-              // const updatedAds = { ...projectAds };
-              // delete updatedAds[item];
-              // setProjectAds(updatedAds);
           }
           setCompanyProjects(updated);
           saveSettingsToFirestore(updated, null);
@@ -751,7 +791,7 @@ export default function ClientFlow() {
 
     return (
       <div className="pb-24">
-        {/* [修正] 將標題列設定為 w-full 以填滿螢幕，防止左右滑動 */}
+        {/* [修正] 使用 w-full 確保寬度填滿，防止右側空白 */}
         <div className={`w-full px-4 pt-10 pb-4 sticky top-0 z-10 border-b transition-colors ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
            <div className="flex justify-between items-center mb-4">
               <div>
@@ -867,7 +907,12 @@ export default function ClientFlow() {
                              {/* [新增] 廣告管理按鈕 */}
                              <button 
                                 type="button"
-                                onClick={(e) => { e.stopPropagation(); setAdManageProject(project); }}
+                                onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setAdManageProject(project); 
+                                    setAdForm({ id: '', name: '', startDate: '', endDate: '' });
+                                    setIsEditingAd(false);
+                                }}
                                 className="ml-1 text-blue-400 hover:text-blue-600"
                                 title="管理廣告選項"
                              >
@@ -922,7 +967,6 @@ export default function ClientFlow() {
                                 <button onClick={() => toggleUserStatus(u)} className={`p-2 rounded-lg text-xs font-bold ${u.status === 'suspended' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
                                     {u.status === 'suspended' ? <CheckCircle className="w-4 h-4"/> : <Ban className="w-4 h-4"/>}
                                 </button>
-                                {/* [修改] 刪除按鈕改為觸發 Modal */}
                                 <button onClick={() => handleDeleteUser(u)} className="p-2 bg-red-100 text-red-600 rounded-lg text-xs font-bold">
                                     <Trash2 className="w-4 h-4"/>
                                 </button>
@@ -1074,6 +1118,7 @@ export default function ClientFlow() {
 
     return (
       <div className={`min-h-screen flex items-center justify-center p-4 transition-colors ${darkMode ? 'bg-slate-950' : 'bg-gray-100'}`}>
+         {/* [修正] Login Container width */}
          <div className={`w-full max-w-md p-8 rounded-2xl shadow-xl transition-colors ${darkMode ? 'bg-slate-900 border border-slate-800' : 'bg-white'}`}>
             <div className="text-center mb-8">
                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-600 text-white mb-4 shadow-lg shadow-blue-600/30">
@@ -1186,13 +1231,18 @@ export default function ClientFlow() {
 
     const [isProcessingImg, setIsProcessingImg] = useState(false);
 
-    // [新增] 根據所選專案動態更新「從何得知」選單
+    // [新增] 根據所選專案動態更新「從何得知」選單 (只顯示名稱)
     const availableSources = useMemo(() => {
         const baseSources = DEFAULT_SOURCES;
+        let sources = [...baseSources];
+        
         if (formData.project && projectAds[formData.project]) {
-            return [...baseSources, ...projectAds[formData.project]]; // 合併預設來源與該案場的廣告選項
+            // 從物件陣列中提取名稱，若為舊版字串則直接使用
+            const ads = projectAds[formData.project].map(ad => typeof ad === 'string' ? ad : ad.name);
+            sources = [...sources, ...ads];
         }
-        return baseSources;
+        // 使用 Set 去除重複項目，避免 key 重複錯誤
+        return [...new Set(sources)];
     }, [formData.project, projectAds]);
 
     const handleFileChange = async (e) => {
@@ -1377,7 +1427,7 @@ export default function ClientFlow() {
   if (view === 'detail' && selectedCustomer) return <CustomerDetail customer={selectedCustomer} />;
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-800'} overflow-x-hidden`}>
+    <div className={`min-h-screen w-full transition-colors duration-300 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-800'} overflow-x-hidden`}>
       {activeTab === 'clients' ? renderClientsTab() : renderDashboardTab()}
       
       {/* 底部導航 */}
@@ -1414,33 +1464,90 @@ export default function ClientFlow() {
         </div>
       )}
 
-      {/* [新增] 廣告管理 Modal */}
+      {/* [新增] 廣告管理 Modal - 支援日期設定 */}
       {adManageProject && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-             <div className={`w-full max-w-sm p-6 rounded-2xl shadow-xl transform transition-all ${darkMode ? 'bg-slate-900 text-white' : 'bg-white'}`}>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-bold flex items-center gap-2"><Megaphone className="w-5 h-5 text-blue-500"/> 管理廣告: {adManageProject}</h3>
-                    <button onClick={() => setAdManageProject(null)}><XCircle className="w-5 h-5 opacity-50 hover:opacity-100"/></button>
+             <div className={`w-full max-w-md p-6 rounded-2xl shadow-xl transform transition-all max-h-[80vh] overflow-y-auto ${darkMode ? 'bg-slate-900 text-white' : 'bg-white'}`}>
+                <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200 dark:border-slate-700">
+                    <h3 className="text-lg font-bold flex items-center gap-2"><Megaphone className="w-5 h-5 text-blue-500"/> 廣告管理: <span className="text-blue-600">{adManageProject}</span></h3>
+                    <button onClick={() => { setAdManageProject(null); setIsEditingAd(false); }}><XCircle className="w-5 h-5 opacity-50 hover:opacity-100"/></button>
                 </div>
                 
-                <div className="space-y-3 mb-6">
+                {/* 廣告輸入表單 */}
+                <div className="space-y-3 mb-6 bg-gray-50 dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700">
+                    <h4 className="text-xs font-bold text-gray-400 uppercase">{isEditingAd ? '編輯廣告' : '新增廣告'}</h4>
+                    <input 
+                        value={adForm.name} 
+                        onChange={(e) => setAdForm({...adForm, name: e.target.value})}
+                        className={`w-full px-3 py-2 rounded-lg border text-sm outline-none ${darkMode ? 'bg-slate-900 border-slate-600' : 'bg-white border-gray-300'}`}
+                        placeholder="廣告名稱 (如: FB-大成一期)"
+                    />
                     <div className="flex gap-2">
-                        <input 
-                            value={newAdName} 
-                            onChange={(e) => setNewAdName(e.target.value)}
-                            className={`flex-1 px-3 py-2 rounded-lg border text-sm outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-gray-50 border-gray-300'}`}
-                            placeholder="輸入廣告名稱 (如: FB-大成一期)"
-                        />
-                        <button onClick={handleAddAd} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-bold">新增</button>
+                        <div className="flex-1">
+                            <label className="text-[10px] text-gray-500 block mb-1">開始日期</label>
+                            <input 
+                                type="date"
+                                value={adForm.startDate} 
+                                onChange={(e) => setAdForm({...adForm, startDate: e.target.value})}
+                                className={`w-full px-3 py-2 rounded-lg border text-sm outline-none ${darkMode ? 'bg-slate-900 border-slate-600' : 'bg-white border-gray-300'}`}
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-[10px] text-gray-500 block mb-1">結束日期</label>
+                            <input 
+                                type="date"
+                                value={adForm.endDate} 
+                                onChange={(e) => setAdForm({...adForm, endDate: e.target.value})}
+                                className={`w-full px-3 py-2 rounded-lg border text-sm outline-none ${darkMode ? 'bg-slate-900 border-slate-600' : 'bg-white border-gray-300'}`}
+                            />
+                        </div>
                     </div>
-                    <div className="max-h-40 overflow-y-auto space-y-2">
-                        {(projectAds[adManageProject] || []).length === 0 ? <p className="text-xs text-gray-400 text-center py-2">目前無專屬廣告來源</p> : 
-                            (projectAds[adManageProject] || []).map(ad => (
-                                <div key={ad} className="flex justify-between items-center bg-gray-100 dark:bg-slate-800 px-3 py-2 rounded-lg text-sm">
-                                    <span>{ad}</span>
-                                    <button onClick={() => handleDeleteAd(ad)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
-                                </div>
-                            ))
+                    <div className="flex gap-2 mt-2">
+                        {isEditingAd && <button onClick={() => { setIsEditingAd(false); setAdForm({ id: '', name: '', startDate: '', endDate: '' }); }} className="flex-1 py-2 rounded-lg text-sm bg-gray-200 text-gray-600">取消</button>}
+                        <button onClick={handleSaveAd} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1 hover:bg-blue-700">
+                           {isEditingAd ? <Save className="w-4 h-4"/> : <Plus className="w-4 h-4"/>} {isEditingAd ? '儲存變更' : '新增廣告'}
+                        </button>
+                    </div>
+                </div>
+
+                {/* 廣告列表 */}
+                <div className="space-y-2">
+                    <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">現有廣告 ({ (projectAds[adManageProject] || []).length })</h4>
+                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                        {(projectAds[adManageProject] || []).length === 0 ? <p className="text-xs text-gray-400 text-center py-4 border dashed border-gray-300 rounded-lg">尚無廣告設定</p> : 
+                            (projectAds[adManageProject] || []).map((ad, idx) => {
+                                const adObj = typeof ad === 'string' ? { id: idx, name: ad, endDate: '' } : ad;
+                                const daysLeft = getDaysLeft(adObj.endDate);
+                                let badgeColor = 'bg-gray-100 text-gray-500';
+                                if (daysLeft !== null) {
+                                    if (daysLeft > 7) badgeColor = 'bg-green-100 text-green-600';
+                                    else if (daysLeft > 0) badgeColor = 'bg-yellow-100 text-yellow-600';
+                                    else badgeColor = 'bg-red-100 text-red-600';
+                                }
+
+                                return (
+                                    <div key={adObj.id || idx} className={`flex flex-col p-3 rounded-lg border text-sm ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-100 shadow-sm'}`}>
+                                        <div className="flex justify-between items-start mb-2">
+                                            <span className="font-bold">{adObj.name}</span>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => handleEditAdInit(ad)} className="text-blue-500 hover:text-blue-700 p-1"><Edit className="w-4 h-4"/></button>
+                                                <button onClick={() => handleDeleteAd(adObj.id || adObj.name)} className="text-red-400 hover:text-red-600 p-1"><Trash2 className="w-4 h-4"/></button>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between items-center text-xs">
+                                            <div className="text-gray-400 flex items-center gap-1">
+                                                <Calendar className="w-3 h-3"/>
+                                                {adObj.startDate || '-'} ~ {adObj.endDate || '-'}
+                                            </div>
+                                            {daysLeft !== null && (
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${badgeColor}`}>
+                                                    <Timer className="w-3 h-3"/> {daysLeft > 0 ? `剩 ${daysLeft} 天` : '已結束'}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })
                         }
                     </div>
                 </div>
